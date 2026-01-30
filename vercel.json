@@ -10,15 +10,11 @@
       "src": "api/index.py",
       "use": "@vercel/python@4.3.1",
       "config": {
-        "maxDuration": 60
+        "maxDuration": 60,
+        "excludeFiles": "{backend/venv/**,backend/app/index_data/**,backend/app/__pycache__/**,Public Policies/**,.git/**,node_modules/**,frontend/node_modules/**,**/*.pyc,**/__pycache__/**,*.pdf}"
       }
     }
   ],
-  "functions": {
-    "api/**/*.py": {
-      "excludeFiles": "{backend/venv/**,backend/app/index_data/**,backend/app/__pycache__/**,Public Policies/**,.git/**,node_modules/**,frontend/node_modules/**,**/*.pyc,**/__pycache__/**,*.pdf}"
-    }
-  },
   "routes": [
     {
       "src": "/api/(.*)",
