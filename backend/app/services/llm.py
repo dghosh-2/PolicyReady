@@ -20,7 +20,6 @@ client = AsyncOpenAI(
 
 # Higher concurrency for speed
 MAX_CONCURRENT = 10
-semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
 
 class KeywordsResult(BaseModel):
@@ -34,7 +33,7 @@ class AnswerResult(BaseModel):
     page: Optional[int] = Field(default=None)
 
 
-async def _call_with_retry(coro, max_retries=2):
+async def _call_with_retry(coro, semaphore: asyncio.Semaphore, max_retries=2):
     """Retry with backoff on rate limit or timeout."""
     for attempt in range(max_retries):
         try:
@@ -48,7 +47,7 @@ async def _call_with_retry(coro, max_retries=2):
     return None
 
 
-async def extract_keywords_single(question: str, idx: int) -> tuple[int, list[str]]:
+async def _extract_keywords_single(question: str, idx: int, semaphore: asyncio.Semaphore) -> tuple[int, list[str]]:
     """Extract keywords for a single question."""
     
     response = await _call_with_retry(
@@ -61,7 +60,8 @@ async def extract_keywords_single(question: str, idx: int) -> tuple[int, list[st
             response_format=KeywordsResult,
             temperature=0,
             max_tokens=100
-        )
+        ),
+        semaphore
     )
     
     if response and response.choices[0].message.parsed:
@@ -71,17 +71,20 @@ async def extract_keywords_single(question: str, idx: int) -> tuple[int, list[st
 
 async def extract_all_keywords_parallel(questions: list[str]) -> list[list[str]]:
     """Extract keywords for all questions in parallel."""
+    # Create semaphore in the current event loop context
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     
-    tasks = [extract_keywords_single(q, idx) for idx, q in enumerate(questions)]
+    tasks = [_extract_keywords_single(q, idx, semaphore) for idx, q in enumerate(questions)]
     results = await asyncio.gather(*tasks)
     results.sort(key=lambda x: x[0])
     return [kw for _, kw in results]
 
 
-async def answer_single_question(
+async def _answer_single_question(
     idx: int,
     question: str,
-    evidence_chunks: list[ChunkMatch]
+    evidence_chunks: list[ChunkMatch],
+    semaphore: asyncio.Semaphore
 ) -> tuple[int, ComplianceAnswer]:
     """Answer a single compliance question."""
     
@@ -116,7 +119,8 @@ async def answer_single_question(
             response_format=AnswerResult,
             temperature=0,
             max_tokens=300
-        )
+        ),
+        semaphore
     )
     
     if response and response.choices[0].message.parsed:
@@ -154,9 +158,11 @@ async def answer_all_questions_streaming(
     evidence_per_question: list[list[ChunkMatch]]
 ) -> AsyncGenerator[tuple[int, ComplianceAnswer], None]:
     """Answer all questions in parallel, yielding results as they complete."""
+    # Create semaphore in the current event loop context
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     
     tasks = [
-        asyncio.create_task(answer_single_question(idx, q, evidence))
+        asyncio.create_task(_answer_single_question(idx, q, evidence, semaphore))
         for idx, (q, evidence) in enumerate(zip(questions, evidence_per_question))
     ]
     
