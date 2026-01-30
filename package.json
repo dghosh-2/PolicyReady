@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Healthcare compliance audit tool",
   "scripts": {
-    "build": "cd frontend && npm install && ./node_modules/.bin/next build",
+    "build": "npm --prefix frontend ci && npm --prefix frontend run build",
     "dev": "concurrently -k \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "cd backend && . venv/bin/activate && uvicorn app.main:app --reload --port 8000",
     "dev:frontend": "cd frontend && npm run dev",
