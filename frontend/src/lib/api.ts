@@ -67,39 +67,51 @@ export async function* analyzeStream(
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/analyze/stream`, {
-    method: "POST",
-    body: formData,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${getApiUrl()}${getApiPrefix()}/analyze/stream`, {
+      method: "POST",
+      body: formData,
+    });
+  } catch (networkError) {
+    // Network-level error (DNS, connection refused, CORS, etc.)
+    const msg = networkError instanceof Error ? networkError.message : "Network error";
+    throw new Error(`Connection failed: ${msg}. Please check your internet connection.`);
+  }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: "Analysis failed" }));
-    throw new Error(error.detail || "Analysis failed");
+    const error = await res.json().catch(() => ({ detail: `Server error: ${res.status} ${res.statusText}` }));
+    throw new Error(error.detail || `Analysis failed: ${res.status}`);
   }
 
   const reader = res.body?.getReader();
-  if (!reader) throw new Error("No response body");
+  if (!reader) throw new Error("No response body from server");
 
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        try {
-          const data = JSON.parse(line.slice(6)) as SSEEvent;
-          yield data;
-        } catch {
-          // Skip malformed JSON
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6)) as SSEEvent;
+            yield data;
+          } catch {
+            // Skip malformed JSON
+          }
         }
       }
     }
+  } catch (streamError) {
+    const msg = streamError instanceof Error ? streamError.message : "Stream interrupted";
+    throw new Error(`Connection lost during analysis: ${msg}`);
   }
 }
