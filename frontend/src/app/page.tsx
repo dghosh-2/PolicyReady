@@ -209,8 +209,8 @@ export default function Home() {
               <div className="animate-fade-in stagger-2">
                 <FileUpload
                   onFileSelect={handleFileSelect}
-                  disabled={analysisState !== "idle"}
-                  isAnalyzing={analysisState === "analyzing"}
+                  disabled={false}
+                  isAnalyzing={false}
                 />
               </div>
 
