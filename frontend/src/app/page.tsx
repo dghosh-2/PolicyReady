@@ -3,12 +3,11 @@
 import { useState, useCallback, useEffect } from "react";
 import PolicyBrowser from "@/components/PolicyBrowser";
 import FileUpload from "@/components/FileUpload";
-import ProgressBar from "@/components/ProgressBar";
 import QuestionCard from "@/components/QuestionCard";
 import HistoryPanel from "@/components/HistoryPanel";
 import { analyzeStream } from "@/lib/api";
 import { saveToHistory, getHistory } from "@/lib/history";
-import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem, AnalysisPhase } from "@/types";
+import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem } from "@/types";
 
 type AnalysisState = "idle" | "analyzing" | "complete" | "error";
 type Tab = "analyze" | "history";
@@ -16,8 +15,6 @@ type Tab = "analyze" | "history";
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("analyze");
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
-  const [phase, setPhase] = useState<AnalysisPhase>("uploading");
-  const [status, setStatus] = useState("");
   const [questions, setQuestions] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<number, ComplianceAnswer>>({});
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
@@ -25,7 +22,6 @@ export default function Home() {
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>("");
   const [historyCount, setHistoryCount] = useState(0);
-  const [processingIndices, setProcessingIndices] = useState<Set<number>>(new Set());
 
   // Load history count on mount
   useEffect(() => {
@@ -34,15 +30,12 @@ export default function Home() {
 
   const handleFileSelect = useCallback(async (file: File) => {
     setAnalysisState("analyzing");
-    setPhase("uploading");
-    setStatus("Uploading file...");
     setQuestions([]);
     setAnswers({});
     setProgress(null);
     setError(null);
     setCurrentFilename(file.name);
     setActiveTab("analyze");
-    setProcessingIndices(new Set());
 
     try {
       let finalQuestions: string[] = [];
@@ -50,21 +43,13 @@ export default function Home() {
       let finalProgress: AnalysisProgress | null = null;
 
       for await (const event of analyzeStream(file)) {
-        console.log("[SSE Event]", event.type, event);
-        
         switch (event.type) {
           case "status":
-            setStatus(event.message);
-            break;
-
           case "phase":
-            console.log("[Phase Change]", event.phase);
-            setPhase(event.phase);
-            setStatus(event.message);
+            // Status updates - we don't show these since Vercel buffers the stream
             break;
 
           case "questions":
-            console.log("[Questions Received]", event.questions.length, "questions");
             finalQuestions = event.questions;
             setQuestions(event.questions);
             setProgress({
@@ -74,8 +59,6 @@ export default function Home() {
               not_met: 0,
               partial: 0,
             });
-            // Mark all questions as pending initially
-            setProcessingIndices(new Set());
             break;
 
           case "answer":
@@ -86,17 +69,10 @@ export default function Home() {
             }));
             setProgress(event.progress);
             finalProgress = event.progress;
-            // Remove from processing set when answered
-            setProcessingIndices((prev) => {
-              const next = new Set(prev);
-              next.delete(event.index);
-              return next;
-            });
             break;
 
           case "complete":
             setAnalysisState("complete");
-            setPhase("complete");
             finalProgress = {
               answered: event.total,
               total: event.total,
@@ -105,7 +81,6 @@ export default function Home() {
               partial: event.partial,
             };
             setProgress(finalProgress);
-            setProcessingIndices(new Set());
             
             // Save to history
             saveToHistory({
@@ -134,14 +109,11 @@ export default function Home() {
 
   const handleReset = () => {
     setAnalysisState("idle");
-    setPhase("uploading");
-    setStatus("");
     setQuestions([]);
     setAnswers({});
     setProgress(null);
     setError(null);
     setCurrentFilename("");
-    setProcessingIndices(new Set());
   };
 
   const handleSelectHistory = (item: AnalysisHistoryItem) => {
@@ -156,14 +128,7 @@ export default function Home() {
     });
     setCurrentFilename(item.filename);
     setAnalysisState("complete");
-    setPhase("complete");
     setActiveTab("analyze");
-  };
-
-  // Determine which questions are "processing" (in the analyzing phase but not yet answered)
-  const isQuestionProcessing = (index: number): boolean => {
-    if (phase !== "analyzing") return false;
-    return !answers[index];
   };
 
   return (
@@ -280,18 +245,6 @@ export default function Home() {
         ) : (
           /* Analysis in progress or complete */
           <div className="space-y-6">
-            {/* Progress bar - always visible during analysis */}
-            {(analysisState === "analyzing" || analysisState === "complete") && (
-              <div className="animate-fade-in sticky top-16 z-30">
-                <ProgressBar 
-                  progress={progress} 
-                  status={status} 
-                  phase={phase}
-                  filename={currentFilename}
-                />
-              </div>
-            )}
-
             {/* Error state */}
             {analysisState === "error" && (
               <div className="animate-fade-in bg-red-50 border border-red-200 rounded-2xl p-5">
@@ -315,18 +268,39 @@ export default function Home() {
               </div>
             )}
 
-            {/* Questions list - show as soon as questions are extracted */}
+            {/* Summary header when complete */}
+            {analysisState === "complete" && progress && (
+              <div className="bg-white rounded-2xl border border-sky-100 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-sky-900">Analysis Complete</h3>
+                    <p className="text-sm text-sky-600 mt-0.5">{currentFilename}</p>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                      <span className="font-medium text-emerald-700">{progress.met} Met</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                      <span className="font-medium text-amber-700">{progress.partial} Partial</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                      <span className="font-medium text-red-700">{progress.not_met} Not Met</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Questions list - show results */}
             {questions.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-medium text-sky-500 uppercase tracking-wide">
                     Questions ({questions.length})
                   </h3>
-                  {progress && progress.answered > 0 && (
-                    <span className="text-sm text-sky-600">
-                      {progress.answered} / {progress.total} analyzed
-                    </span>
-                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -336,34 +310,29 @@ export default function Home() {
                       index={index}
                       question={question}
                       answer={answers[index] || null}
-                      isProcessing={isQuestionProcessing(index)}
                     />
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Show loading skeleton while extracting questions */}
+            {/* Loading state while processing */}
             {analysisState === "analyzing" && questions.length === 0 && (
-              <div className="space-y-3">
-                <h3 className="text-sm font-medium text-sky-500 uppercase tracking-wide">
-                  Questions
-                </h3>
-                <div className="space-y-2">
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <div 
-                      key={i} 
-                      className="bg-white rounded-xl border border-slate-200 p-4 animate-pulse"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-7 h-7 rounded-full bg-slate-200"></div>
-                        <div className="flex-1 space-y-2">
-                          <div className="h-4 bg-slate-200 rounded w-full"></div>
-                          <div className="h-4 bg-slate-200 rounded w-3/4"></div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="relative">
+                  <div className="w-16 h-16 rounded-full border-4 border-sky-100"></div>
+                  <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-sky-500 border-t-transparent animate-spin"></div>
+                </div>
+                <h3 className="mt-6 text-lg font-semibold text-sky-900">Analyzing {currentFilename}</h3>
+                <p className="mt-2 text-sky-600 text-center max-w-md">
+                  Extracting questions, searching policies, and evaluating compliance. 
+                  This typically takes 30-60 seconds.
+                </p>
+                <div className="mt-6 flex items-center gap-2 text-sm text-sky-500">
+                  <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  </svg>
+                  <span>Processing...</span>
                 </div>
               </div>
             )}

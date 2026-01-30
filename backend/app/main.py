@@ -232,7 +232,12 @@ async def analyze_stream(file: UploadFile = File(...)):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "Content-Encoding": "none",  # Prevent compression buffering
+        }
     )
 
 
