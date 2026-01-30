@@ -71,7 +71,7 @@ export async function* analyzeStream(
   const apiUrl = getApiUrl();
   const apiPrefix = getApiPrefix();
   const fullUrl = `${apiUrl}${apiPrefix}/analyze/stream`;
-  fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream',message:'Request details',data:{apiUrl,apiPrefix,fullUrl,hostname:typeof window!=='undefined'?window.location.hostname:'ssr',fileName:file.name,fileSize:file.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  console.log('[DEBUG] analyzeStream called:', { apiUrl, apiPrefix, fullUrl, hostname: typeof window !== 'undefined' ? window.location.hostname : 'ssr', fileName: file.name, fileSize: file.size });
   // #endregion
 
   let res: Response;
@@ -82,19 +82,19 @@ export async function* analyzeStream(
     });
   } catch (err) {
     // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:catch',message:'Fetch error',data:{error:String(err),fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,E'})}).catch(()=>{});
+    console.error('[DEBUG] analyzeStream fetch error:', { error: String(err), fullUrl });
     // #endregion
     throw err;
   }
 
   // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:response',message:'Response received',data:{status:res.status,ok:res.ok,statusText:res.statusText,fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,D'})}).catch(()=>{});
+  console.log('[DEBUG] analyzeStream response:', { status: res.status, ok: res.ok, statusText: res.statusText, fullUrl });
   // #endregion
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Analysis failed" }));
     // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:error',message:'Response not ok',data:{status:res.status,error,fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,D'})}).catch(()=>{});
+    console.error('[DEBUG] analyzeStream not ok:', { status: res.status, error, fullUrl });
     // #endregion
     throw new Error(error.detail || "Analysis failed");
   }
