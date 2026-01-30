@@ -1,0 +1,16 @@
+{
+  "name": "policyready",
+  "version": "1.0.0",
+  "description": "Healthcare compliance audit tool",
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && . venv/bin/activate && uvicorn app.main:app --reload --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "index": "cd backend && . venv/bin/activate && python scripts/build_index.py",
+    "kill": "lsof -ti:8000 | xargs kill -9 2>/dev/null; lsof -ti:3000 | xargs kill -9 2>/dev/null; echo 'Killed processes on ports 8000 and 3000'",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && python3 -m venv venv && . venv/bin/activate && pip install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

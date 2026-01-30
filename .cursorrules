@@ -1,0 +1,40 @@
+# PolicyReady Project Rules
+
+## Project Overview
+Healthcare compliance audit tool that ingests PDFs, indexes them with keyword-based search, and uses GPT-4 to evaluate audit questions with structured evidence output.
+
+## Tech Stack
+- Backend: FastAPI (Python 3.11+)
+- Frontend: Next.js 14+ with TypeScript
+- Search: Inverted keyword index (JSON)
+- LLM: OpenAI GPT-4 with structured outputs
+
+## Code Style
+
+### Python (Backend)
+- Use type hints for all function signatures
+- Use Pydantic models for request/response validation
+- Use async/await for I/O operations
+- Keep services in separate modules under `app/services/`
+- No unnecessary abstractions - keep it simple
+
+### TypeScript (Frontend)
+- Use functional components with hooks
+- Use TypeScript strict mode
+- Keep API calls in `lib/api.ts`
+- Use Tailwind for styling - no CSS modules
+
+## Architecture Principles
+- Fail-closed: If no explicit evidence exists, mark as NOT_MET
+- Evidence-first: LLM must provide verbatim quotes
+- Simple MVP: Only implement what's strictly necessary
+- Clear separation: Services handle business logic, routes handle HTTP
+
+## File Organization
+- Backend: `backend/app/` with `services/`, `models.py`
+- Frontend: `frontend/src/app/` for pages, `components/` for reusable UI
+
+## Comments
+- No emojis in comments
+- Comment only when logic is non-obvious
+- Prefer self-documenting code
