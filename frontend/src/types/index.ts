@@ -51,8 +51,16 @@ export interface AnalysisProgress {
 }
 
 // SSE Event Types
+export type AnalysisPhase = "uploading" | "extracting" | "keywords" | "searching" | "analyzing" | "complete";
+
 export interface SSEStatusEvent {
   type: "status";
+  message: string;
+}
+
+export interface SSEPhaseEvent {
+  type: "phase";
+  phase: AnalysisPhase;
   message: string;
 }
 
@@ -84,6 +92,7 @@ export interface SSEErrorEvent {
 
 export type SSEEvent =
   | SSEStatusEvent
+  | SSEPhaseEvent
   | SSEQuestionsEvent
   | SSEAnswerEvent
   | SSECompleteEvent

@@ -169,7 +169,7 @@ async def analyze_stream(file: UploadFile = File(...)):
     async def generate():
         try:
             # Step 1: Extract questions from PDF
-            yield f"data: {json.dumps({'type': 'status', 'message': 'Extracting questions from PDF...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'phase', 'phase': 'extracting', 'message': 'Extracting questions from PDF...'})}\n\n"
             
             questions = extract_questions_from_pdf(tmp_path)
             
@@ -181,13 +181,13 @@ async def analyze_stream(file: UploadFile = File(...)):
             yield f"data: {json.dumps({'type': 'questions', 'questions': questions, 'total': len(questions)})}\n\n"
             
             # Step 2: Extract keywords for ALL questions in parallel
-            yield f"data: {json.dumps({'type': 'status', 'message': f'Extracting keywords for {len(questions)} questions...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'phase', 'phase': 'keywords', 'message': f'Generating keywords for {len(questions)} questions...'})}\n\n"
             
             all_keywords = await extract_all_keywords_parallel(questions)
             
-            yield f"data: {json.dumps({'type': 'status', 'message': 'Keywords extracted. Searching policy database...'})}\n\n"
-            
             # Step 3: Search ALL at once (batch search - instant)
+            yield f"data: {json.dumps({'type': 'phase', 'phase': 'searching', 'message': 'Searching policy database...'})}\n\n"
+            
             engine = get_search_engine()
             all_evidence = engine.search_batch(all_keywords, top_k_per_query=6)
             
@@ -195,7 +195,8 @@ async def analyze_stream(file: UploadFile = File(...)):
             for i, (kw, ev) in enumerate(zip(all_keywords, all_evidence)):
                 print(f"Q{i+1} keywords: {kw[:5]}... -> {len(ev)} chunks found")
             
-            yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing compliance for each question...'})}\n\n"
+            # Step 4: Analyze compliance
+            yield f"data: {json.dumps({'type': 'phase', 'phase': 'analyzing', 'message': 'Analyzing compliance for each question...'})}\n\n"
             
             # Step 4: Answer ALL questions in parallel, streaming results
             answered = 0

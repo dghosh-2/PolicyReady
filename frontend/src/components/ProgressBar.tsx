@@ -1,8 +1,6 @@
 "use client";
 
-import type { AnalysisProgress } from "@/types";
-
-type AnalysisPhase = "uploading" | "extracting" | "keywords" | "searching" | "analyzing" | "complete";
+import type { AnalysisProgress, AnalysisPhase } from "@/types";
 
 interface ProgressBarProps {
   progress: AnalysisProgress | null;

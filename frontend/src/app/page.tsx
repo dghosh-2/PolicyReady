@@ -8,10 +8,9 @@ import QuestionCard from "@/components/QuestionCard";
 import HistoryPanel from "@/components/HistoryPanel";
 import { analyzeStream } from "@/lib/api";
 import { saveToHistory, getHistory } from "@/lib/history";
-import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem } from "@/types";
+import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem, AnalysisPhase } from "@/types";
 
 type AnalysisState = "idle" | "analyzing" | "complete" | "error";
-type AnalysisPhase = "uploading" | "extracting" | "keywords" | "searching" | "analyzing" | "complete";
 type Tab = "analyze" | "history";
 
 export default function Home() {
@@ -54,22 +53,16 @@ export default function Home() {
         switch (event.type) {
           case "status":
             setStatus(event.message);
-            // Parse status to determine phase
-            if (event.message.includes("Extracting questions")) {
-              setPhase("extracting");
-            } else if (event.message.includes("Extracting keywords") || event.message.includes("keywords")) {
-              setPhase("keywords");
-            } else if (event.message.includes("Searching") || event.message.includes("search")) {
-              setPhase("searching");
-            } else if (event.message.includes("Analyzing compliance") || event.message.includes("compliance")) {
-              setPhase("analyzing");
-            }
+            break;
+
+          case "phase":
+            setPhase(event.phase);
+            setStatus(event.message);
             break;
 
           case "questions":
             finalQuestions = event.questions;
             setQuestions(event.questions);
-            setPhase("keywords");
             setProgress({
               answered: 0,
               total: event.total,
