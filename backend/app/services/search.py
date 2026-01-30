@@ -10,14 +10,23 @@ class KeywordSearchEngine:
     Keyword-based search engine using an inverted index with fuzzy matching.
     """
     
-    def __init__(self, index_path: str | Path):
-        self.index_path = Path(index_path)
+    def __init__(self, index_path: str | Path | None = None, index_data: dict | None = None):
+        self.index_path = Path(index_path) if index_path else None
         self._index: PolicyIndex | None = None
         self._chunk_map: dict[str, TextChunk] = {}
+        self._index_data = index_data  # Pre-loaded index data (for Supabase)
     
     def load(self) -> None:
-        """Load the index from disk."""
-        self._index = load_index(self.index_path)
+        """Load the index from disk or from pre-loaded data."""
+        if self._index_data:
+            # Load from pre-loaded data (Supabase)
+            self._index = PolicyIndex(**self._index_data)
+        elif self.index_path:
+            # Load from local file
+            self._index = load_index(self.index_path)
+        else:
+            raise ValueError("No index path or data provided")
+        
         self._chunk_map = {chunk.id: chunk for chunk in self._index.chunks}
     
     @property
@@ -135,7 +144,18 @@ def get_search_engine() -> KeywordSearchEngine:
     """Get or create the global search engine instance."""
     global _search_engine
     if _search_engine is None:
+        # Try Supabase first (for Vercel deployment)
+        from .supabase_storage import is_supabase_configured, get_index_json
+        
+        if is_supabase_configured():
+            index_data = get_index_json()
+            if index_data:
+                _search_engine = KeywordSearchEngine(index_data=index_data)
+                _search_engine.load()
+                return _search_engine
+        
+        # Fall back to local file (for local development)
         index_path = Path(__file__).parent.parent / "index_data" / "index.json"
-        _search_engine = KeywordSearchEngine(index_path)
+        _search_engine = KeywordSearchEngine(index_path=index_path)
         _search_engine.load()
     return _search_engine

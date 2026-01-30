@@ -8,6 +8,7 @@ venv/
 # Environment
 .env
 .env.local
+.env*.local
 
 # Build outputs
 .next/
@@ -28,3 +29,6 @@ backend/app/index_data/
 
 # Logs
 *.log
+
+# Vercel
+.vercel

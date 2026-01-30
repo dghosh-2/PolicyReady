@@ -1,0 +1,17 @@
+[project]
+name = "policyready"
+version = "1.0.0"
+description = "Healthcare compliance audit tool"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "python-multipart>=0.0.9",
+    "pymupdf>=1.25.0",
+    "openai>=1.50.0",
+    "pydantic>=2.9.0",
+    "python-dotenv>=1.0.0",
+    "supabase>=1.0.0",
+]
+
+[project.scripts]
+app = "backend.app.main:app"

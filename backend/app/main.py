@@ -15,17 +15,24 @@ from .models import (
     AnalysisResponse,
     ComplianceStatus
 )
-from .services.pdf_parser import extract_questions_from_pdf
+from .services.pdf_parser import extract_questions_from_pdf, extract_text_from_pdf
 from .services.search import get_search_engine
 from .services.llm import extract_all_keywords_parallel, answer_all_questions_streaming
+from .services.supabase_storage import (
+    is_supabase_configured,
+    list_policy_folders,
+    list_folder_files,
+    download_pdf_to_temp
+)
 
 load_dotenv()
 
 app = FastAPI(title="PolicyReady API", version="1.0.0")
 
+# Allow all origins for Vercel deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,41 +41,103 @@ app.add_middleware(
 POLICIES_DIR = Path(__file__).parent.parent.parent / "Public Policies"
 
 
+def is_local_mode() -> bool:
+    """Check if we should use local filesystem (local dev) or Supabase (Vercel)."""
+    return POLICIES_DIR.exists() and not is_supabase_configured()
+
+
 @app.get("/")
 async def root():
-    return {"status": "ok"}
+    return {"status": "ok", "mode": "local" if is_local_mode() else "supabase"}
 
 
 @app.get("/policies", response_model=PoliciesResponse)
 async def list_policies():
-    if not POLICIES_DIR.exists():
-        raise HTTPException(status_code=404, detail="Policies directory not found")
-    
-    folders = []
-    total_files = 0
-    
-    for folder_path in sorted(POLICIES_DIR.iterdir()):
-        if folder_path.is_dir():
-            pdf_count = len(list(folder_path.glob("*.pdf")))
-            folders.append(PolicyFolder(name=folder_path.name, file_count=pdf_count))
-            total_files += pdf_count
-    
-    return PoliciesResponse(folders=folders, total_files=total_files)
+    if is_local_mode():
+        # Local filesystem mode
+        if not POLICIES_DIR.exists():
+            raise HTTPException(status_code=404, detail="Policies directory not found")
+        
+        folders = []
+        total_files = 0
+        
+        for folder_path in sorted(POLICIES_DIR.iterdir()):
+            if folder_path.is_dir():
+                pdf_count = len(list(folder_path.glob("*.pdf")))
+                folders.append(PolicyFolder(name=folder_path.name, file_count=pdf_count))
+                total_files += pdf_count
+        
+        return PoliciesResponse(folders=folders, total_files=total_files)
+    else:
+        # Supabase mode
+        folders_data = list_policy_folders()
+        if not folders_data:
+            raise HTTPException(status_code=404, detail="No policies found in storage")
+        
+        folders = [PolicyFolder(name=f["name"], file_count=f["file_count"]) for f in folders_data]
+        total_files = sum(f["file_count"] for f in folders_data)
+        
+        return PoliciesResponse(folders=folders, total_files=total_files)
 
 
 @app.get("/policies/{folder_name}", response_model=FolderContentsResponse)
 async def get_folder_contents(folder_name: str):
-    folder_path = POLICIES_DIR / folder_name
+    if is_local_mode():
+        # Local filesystem mode
+        folder_path = POLICIES_DIR / folder_name
+        
+        if not folder_path.exists():
+            raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
+        
+        files = [
+            PolicyFile(name=p.name, folder=folder_name, path=str(p.relative_to(POLICIES_DIR.parent)))
+            for p in sorted(folder_path.glob("*.pdf"))
+        ]
+        
+        return FolderContentsResponse(folder=folder_name, files=files)
+    else:
+        # Supabase mode
+        files_data = list_folder_files(folder_name)
+        if not files_data:
+            raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found or empty")
+        
+        files = [PolicyFile(name=f["name"], folder=f["folder"], path=f["path"]) for f in files_data]
+        
+        return FolderContentsResponse(folder=folder_name, files=files)
+
+
+@app.get("/policies/{folder_name}/{file_name}/text")
+async def get_pdf_text(folder_name: str, file_name: str):
+    """Get extracted text from a PDF file."""
+    if not file_name.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files supported")
     
-    if not folder_path.exists():
-        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
-    
-    files = [
-        PolicyFile(name=p.name, folder=folder_name, path=str(p.relative_to(POLICIES_DIR.parent)))
-        for p in sorted(folder_path.glob("*.pdf"))
-    ]
-    
-    return FolderContentsResponse(folder=folder_name, files=files)
+    if is_local_mode():
+        # Local filesystem mode
+        file_path = POLICIES_DIR / folder_name / file_name
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
+        
+        try:
+            pages = extract_text_from_pdf(file_path)
+            return pages
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
+    else:
+        # Supabase mode - download to temp file first
+        tmp_path = download_pdf_to_temp(folder_name, file_name)
+        if not tmp_path:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
+        
+        try:
+            pages = extract_text_from_pdf(tmp_path)
+            return pages
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
 
 @app.get("/index/stats")
