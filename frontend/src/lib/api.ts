@@ -6,18 +6,32 @@ import type {
   PDFChunk,
 } from "@/types";
 
-// Use relative URLs for Vercel deployment, absolute for local dev
-// In local dev, set NEXT_PUBLIC_API_URL=http://localhost:8000 in .env.local
-// In production (Vercel), always use relative URLs regardless of env var
-const isProduction = typeof window !== "undefined" && !window.location.hostname.includes("localhost");
-const envApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-const API_BASE = isProduction ? "" : envApiUrl;
+// Helper to get the API base URL at runtime
+function getApiUrl(): string {
+  // In browser, check if we're on localhost
+  if (typeof window !== "undefined") {
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (isLocalhost) {
+      // Local development - use the env var or default to localhost:8000
+      return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    }
+    // Production - use relative URLs
+    return "";
+  }
+  // Server-side rendering - use relative URLs (will be resolved by the browser)
+  return "";
+}
 
-// For local development, don't add /api prefix since FastAPI handles routes directly
-const API_PREFIX = API_BASE ? "" : "/api";
+// Helper to get the API prefix
+function getApiPrefix(): string {
+  const apiUrl = getApiUrl();
+  // If using absolute URL (local dev), no prefix needed since FastAPI handles routes directly
+  // If using relative URL (production), add /api prefix for Vercel routing
+  return apiUrl ? "" : "/api";
+}
 
 export async function fetchPolicies(): Promise<PoliciesResponse> {
-  const res = await fetch(`${API_BASE}${API_PREFIX}/policies`);
+  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/policies`);
   if (!res.ok) throw new Error("Failed to fetch policies");
   return res.json();
 }
@@ -25,13 +39,13 @@ export async function fetchPolicies(): Promise<PoliciesResponse> {
 export async function fetchFolderContents(
   folderName: string
 ): Promise<FolderContentsResponse> {
-  const res = await fetch(`${API_BASE}${API_PREFIX}/policies/${encodeURIComponent(folderName)}`);
+  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/policies/${encodeURIComponent(folderName)}`);
   if (!res.ok) throw new Error(`Failed to fetch folder: ${folderName}`);
   return res.json();
 }
 
 export async function fetchIndexStats(): Promise<IndexStats> {
-  const res = await fetch(`${API_BASE}${API_PREFIX}/index/stats`);
+  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/index/stats`);
   if (!res.ok) throw new Error("Index not found. Run 'npm run index' first.");
   return res.json();
 }
@@ -41,7 +55,7 @@ export async function fetchPDFText(
   fileName: string
 ): Promise<PDFChunk[]> {
   const res = await fetch(
-    `${API_BASE}${API_PREFIX}/policies/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}/text`
+    `${getApiUrl()}${getApiPrefix()}/policies/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}/text`
   );
   if (!res.ok) throw new Error("Failed to fetch PDF text");
   return res.json();
@@ -53,7 +67,7 @@ export async function* analyzeStream(
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE}${API_PREFIX}/analyze/stream`, {
+  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/analyze/stream`, {
     method: "POST",
     body: formData,
   });
