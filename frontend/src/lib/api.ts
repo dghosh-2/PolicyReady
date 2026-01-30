@@ -8,7 +8,10 @@ import type {
 
 // Use relative URLs for Vercel deployment, absolute for local dev
 // In local dev, set NEXT_PUBLIC_API_URL=http://localhost:8000 in .env.local
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+// In production (Vercel), always use relative URLs regardless of env var
+const isProduction = typeof window !== "undefined" && !window.location.hostname.includes("localhost");
+const envApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+const API_BASE = isProduction ? "" : envApiUrl;
 
 // For local development, don't add /api prefix since FastAPI handles routes directly
 const API_PREFIX = API_BASE ? "" : "/api";
