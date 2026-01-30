@@ -67,35 +67,13 @@ export async function* analyzeStream(
   const formData = new FormData();
   formData.append("file", file);
 
-  // #region agent log
-  const apiUrl = getApiUrl();
-  const apiPrefix = getApiPrefix();
-  const fullUrl = `${apiUrl}${apiPrefix}/analyze/stream`;
-  console.log('[DEBUG] analyzeStream called:', { apiUrl, apiPrefix, fullUrl, hostname: typeof window !== 'undefined' ? window.location.hostname : 'ssr', fileName: file.name, fileSize: file.size });
-  // #endregion
-
-  let res: Response;
-  try {
-    res = await fetch(fullUrl, {
-      method: "POST",
-      body: formData,
-    });
-  } catch (err) {
-    // #region agent log
-    console.error('[DEBUG] analyzeStream fetch error:', { error: String(err), fullUrl });
-    // #endregion
-    throw err;
-  }
-
-  // #region agent log
-  console.log('[DEBUG] analyzeStream response:', { status: res.status, ok: res.ok, statusText: res.statusText, fullUrl });
-  // #endregion
+  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/analyze/stream`, {
+    method: "POST",
+    body: formData,
+  });
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Analysis failed" }));
-    // #region agent log
-    console.error('[DEBUG] analyzeStream not ok:', { status: res.status, error, fullUrl });
-    // #endregion
     throw new Error(error.detail || "Analysis failed");
   }
 
