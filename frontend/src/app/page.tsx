@@ -11,11 +11,13 @@ import { saveToHistory, getHistory } from "@/lib/history";
 import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem } from "@/types";
 
 type AnalysisState = "idle" | "analyzing" | "complete" | "error";
+type AnalysisPhase = "uploading" | "extracting" | "keywords" | "searching" | "analyzing" | "complete";
 type Tab = "analyze" | "history";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("analyze");
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
+  const [phase, setPhase] = useState<AnalysisPhase>("uploading");
   const [status, setStatus] = useState("");
   const [questions, setQuestions] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<number, ComplianceAnswer>>({});
@@ -24,6 +26,7 @@ export default function Home() {
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [currentFilename, setCurrentFilename] = useState<string>("");
   const [historyCount, setHistoryCount] = useState(0);
+  const [processingIndices, setProcessingIndices] = useState<Set<number>>(new Set());
 
   // Load history count on mount
   useEffect(() => {
@@ -32,13 +35,15 @@ export default function Home() {
 
   const handleFileSelect = useCallback(async (file: File) => {
     setAnalysisState("analyzing");
-    setStatus("Starting analysis...");
+    setPhase("uploading");
+    setStatus("Uploading file...");
     setQuestions([]);
     setAnswers({});
     setProgress(null);
     setError(null);
     setCurrentFilename(file.name);
     setActiveTab("analyze");
+    setProcessingIndices(new Set());
 
     try {
       let finalQuestions: string[] = [];
@@ -49,11 +54,22 @@ export default function Home() {
         switch (event.type) {
           case "status":
             setStatus(event.message);
+            // Parse status to determine phase
+            if (event.message.includes("Extracting questions")) {
+              setPhase("extracting");
+            } else if (event.message.includes("Extracting keywords") || event.message.includes("keywords")) {
+              setPhase("keywords");
+            } else if (event.message.includes("Searching") || event.message.includes("search")) {
+              setPhase("searching");
+            } else if (event.message.includes("Analyzing compliance") || event.message.includes("compliance")) {
+              setPhase("analyzing");
+            }
             break;
 
           case "questions":
             finalQuestions = event.questions;
             setQuestions(event.questions);
+            setPhase("keywords");
             setProgress({
               answered: 0,
               total: event.total,
@@ -61,6 +77,8 @@ export default function Home() {
               not_met: 0,
               partial: 0,
             });
+            // Mark all questions as pending initially
+            setProcessingIndices(new Set());
             break;
 
           case "answer":
@@ -71,10 +89,17 @@ export default function Home() {
             }));
             setProgress(event.progress);
             finalProgress = event.progress;
+            // Remove from processing set when answered
+            setProcessingIndices((prev) => {
+              const next = new Set(prev);
+              next.delete(event.index);
+              return next;
+            });
             break;
 
           case "complete":
             setAnalysisState("complete");
+            setPhase("complete");
             finalProgress = {
               answered: event.total,
               total: event.total,
@@ -83,6 +108,7 @@ export default function Home() {
               partial: event.partial,
             };
             setProgress(finalProgress);
+            setProcessingIndices(new Set());
             
             // Save to history
             saveToHistory({
@@ -111,12 +137,14 @@ export default function Home() {
 
   const handleReset = () => {
     setAnalysisState("idle");
+    setPhase("uploading");
     setStatus("");
     setQuestions([]);
     setAnswers({});
     setProgress(null);
     setError(null);
     setCurrentFilename("");
+    setProcessingIndices(new Set());
   };
 
   const handleSelectHistory = (item: AnalysisHistoryItem) => {
@@ -131,7 +159,14 @@ export default function Home() {
     });
     setCurrentFilename(item.filename);
     setAnalysisState("complete");
+    setPhase("complete");
     setActiveTab("analyze");
+  };
+
+  // Determine which questions are "processing" (in the analyzing phase but not yet answered)
+  const isQuestionProcessing = (index: number): boolean => {
+    if (phase !== "analyzing") return false;
+    return !answers[index];
   };
 
   return (
@@ -248,38 +283,15 @@ export default function Home() {
         ) : (
           /* Analysis in progress or complete */
           <div className="space-y-6">
-            {/* Progress bar - visible during analysis */}
-            {analysisState === "analyzing" && (
-              <div className="animate-fade-in">
-                <ProgressBar progress={progress} status={status} />
-              </div>
-            )}
-
-            {/* Complete header */}
-            {analysisState === "complete" && progress && (
-              <div className="animate-fade-in bg-white rounded-2xl p-5 border border-sky-100">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-sky-900">{currentFilename}</h3>
-                    <p className="text-sm text-sky-600 mt-0.5">
-                      {progress.total} questions analyzed
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                      <span className="text-sky-700">{progress.met} met</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                      <span className="text-sky-700">{progress.partial} partial</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                      <span className="text-sky-700">{progress.not_met} not met</span>
-                    </div>
-                  </div>
-                </div>
+            {/* Progress bar - always visible during analysis */}
+            {(analysisState === "analyzing" || analysisState === "complete") && (
+              <div className="animate-fade-in sticky top-16 z-30">
+                <ProgressBar 
+                  progress={progress} 
+                  status={status} 
+                  phase={phase}
+                  filename={currentFilename}
+                />
               </div>
             )}
 
@@ -306,12 +318,19 @@ export default function Home() {
               </div>
             )}
 
-            {/* Questions list */}
+            {/* Questions list - show as soon as questions are extracted */}
             {questions.length > 0 && (
               <div className="space-y-3">
-                <h3 className="text-sm font-medium text-sky-500 uppercase tracking-wide">
-                  Questions ({questions.length})
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-sky-500 uppercase tracking-wide">
+                    Questions ({questions.length})
+                  </h3>
+                  {progress && progress.answered > 0 && (
+                    <span className="text-sm text-sky-600">
+                      {progress.answered} / {progress.total} analyzed
+                    </span>
+                  )}
+                </div>
 
                 <div className="space-y-2">
                   {questions.map((question, index) => (
@@ -320,7 +339,33 @@ export default function Home() {
                       index={index}
                       question={question}
                       answer={answers[index] || null}
+                      isProcessing={isQuestionProcessing(index)}
                     />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Show loading skeleton while extracting questions */}
+            {analysisState === "analyzing" && questions.length === 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-sky-500 uppercase tracking-wide">
+                  Questions
+                </h3>
+                <div className="space-y-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div 
+                      key={i} 
+                      className="bg-white rounded-xl border border-slate-200 p-4 animate-pulse"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-7 h-7 rounded-full bg-slate-200"></div>
+                        <div className="flex-1 space-y-2">
+                          <div className="h-4 bg-slate-200 rounded w-full"></div>
+                          <div className="h-4 bg-slate-200 rounded w-3/4"></div>
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
