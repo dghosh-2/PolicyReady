@@ -1,32 +1,33 @@
-# Ignore policy PDFs - they're stored in Supabase
-Public Policies/
+# Ignore everything at root, then allowlist what we need
+/*
 
-# Ignore Python virtual environment
-backend/venv/
-venv/
+# Allow the API entry point
+!api
 
-# Ignore local node_modules (Vercel installs its own)
-node_modules/
-frontend/node_modules/
+# Allow the backend source code (but not venv or index_data)
+!backend
+backend/venv
+backend/app/index_data
+backend/app/__pycache__
 
-# Ignore local environment files
+# Allow the frontend
+!frontend
+frontend/node_modules
+frontend/.next
+
+# Allow config files
+!vercel.json
+!package.json
+!requirements.txt
+!pyproject.toml
+
+# Always ignore these
+node_modules
+__pycache__
+*.pyc
+*.pyo
 .env
 .env.local
-.env*.local
-
-# Ignore build outputs
-.next/
-frontend/.next/
-
-# Ignore IDE files
-.idea/
-.vscode/
-
-# Ignore OS files
+.git
 .DS_Store
-
-# Ignore git
-.git/
-
-# Ignore index data (will be loaded from Supabase)
-backend/app/index_data/
+Public Policies
