@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { fetchPolicies, fetchFolderContents } from "@/lib/api";
+import { fetchPolicies, fetchFolderContents, fetchIndexStats } from "@/lib/api";
 import type { PolicyFolder, PolicyFile, IndexStats } from "@/types";
 import PDFPreviewModal from "./PDFPreviewModal";
 
@@ -23,7 +23,7 @@ export default function PolicyBrowser({ onStatsLoaded }: PolicyBrowserProps) {
       try {
         const [policiesData, statsRes] = await Promise.all([
           fetchPolicies(),
-          fetch("http://localhost:8000/index/stats").then(r => r.ok ? r.json() : null).catch(() => null),
+          fetchIndexStats().catch(() => null),
         ]);
         setFolders(policiesData.folders);
         setTotalFiles(policiesData.total_files);
