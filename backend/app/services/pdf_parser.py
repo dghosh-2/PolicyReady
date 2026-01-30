@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-import pymupdf
+from pypdf import PdfReader
 
 
 def extract_text_from_pdf(pdf_path: str | Path) -> list[dict]:
@@ -12,15 +12,14 @@ def extract_text_from_pdf(pdf_path: str | Path) -> list[dict]:
     pages = []
     
     try:
-        doc = pymupdf.open(str(pdf_path))
-        for page_num, page in enumerate(doc, start=1):
-            text = page.get_text("text")
-            if text.strip():
+        reader = PdfReader(str(pdf_path))
+        for page_num, page in enumerate(reader.pages, start=1):
+            text = page.extract_text()
+            if text and text.strip():
                 pages.append({
                     "page": page_num,
                     "text": text.strip()
                 })
-        doc.close()
     except Exception as e:
         raise RuntimeError(f"Failed to parse PDF {pdf_path}: {e}")
     
