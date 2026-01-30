@@ -50,17 +50,21 @@ export default function Home() {
       let finalProgress: AnalysisProgress | null = null;
 
       for await (const event of analyzeStream(file)) {
+        console.log("[SSE Event]", event.type, event);
+        
         switch (event.type) {
           case "status":
             setStatus(event.message);
             break;
 
           case "phase":
+            console.log("[Phase Change]", event.phase);
             setPhase(event.phase);
             setStatus(event.message);
             break;
 
           case "questions":
+            console.log("[Questions Received]", event.questions.length, "questions");
             finalQuestions = event.questions;
             setQuestions(event.questions);
             setProgress({
