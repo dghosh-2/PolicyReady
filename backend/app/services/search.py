@@ -148,14 +148,21 @@ def get_search_engine() -> KeywordSearchEngine:
         from .supabase_storage import is_supabase_configured, get_index_json
         
         if is_supabase_configured():
+            print("Supabase configured, fetching index.json...")
             index_data = get_index_json()
             if index_data:
+                print(f"Index loaded from Supabase: {len(index_data.get('chunks', []))} chunks")
                 _search_engine = KeywordSearchEngine(index_data=index_data)
                 _search_engine.load()
                 return _search_engine
+            else:
+                print("Failed to fetch index.json from Supabase")
         
         # Fall back to local file (for local development)
         index_path = Path(__file__).parent.parent / "index_data" / "index.json"
+        if not index_path.exists():
+            raise FileNotFoundError(f"Index not found at {index_path}")
+        print(f"Loading index from local file: {index_path}")
         _search_engine = KeywordSearchEngine(index_path=index_path)
         _search_engine.load()
     return _search_engine
