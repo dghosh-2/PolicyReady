@@ -1,0 +1,32 @@
+# Ignore policy PDFs - they're stored in Supabase
+Public Policies/
+
+# Ignore Python virtual environment
+backend/venv/
+venv/
+
+# Ignore local node_modules (Vercel installs its own)
+node_modules/
+frontend/node_modules/
+
+# Ignore local environment files
+.env
+.env.local
+.env*.local
+
+# Ignore build outputs
+.next/
+frontend/.next/
+
+# Ignore IDE files
+.idea/
+.vscode/
+
+# Ignore OS files
+.DS_Store
+
+# Ignore git
+.git/
+
+# Ignore index data (will be loaded from Supabase)
+backend/app/index_data/
