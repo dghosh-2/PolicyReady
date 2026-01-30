@@ -67,13 +67,35 @@ export async function* analyzeStream(
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${getApiUrl()}${getApiPrefix()}/analyze/stream`, {
-    method: "POST",
-    body: formData,
-  });
+  // #region agent log
+  const apiUrl = getApiUrl();
+  const apiPrefix = getApiPrefix();
+  const fullUrl = `${apiUrl}${apiPrefix}/analyze/stream`;
+  fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream',message:'Request details',data:{apiUrl,apiPrefix,fullUrl,hostname:typeof window!=='undefined'?window.location.hostname:'ssr',fileName:file.name,fileSize:file.size},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
+  let res: Response;
+  try {
+    res = await fetch(fullUrl, {
+      method: "POST",
+      body: formData,
+    });
+  } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:catch',message:'Fetch error',data:{error:String(err),fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,E'})}).catch(()=>{});
+    // #endregion
+    throw err;
+  }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:response',message:'Response received',data:{status:res.status,ok:res.ok,statusText:res.statusText,fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,D'})}).catch(()=>{});
+  // #endregion
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Analysis failed" }));
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3caa4043-50c6-4e0b-8ff9-67551da4c5bd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:analyzeStream:error',message:'Response not ok',data:{status:res.status,error,fullUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B,C,D'})}).catch(()=>{});
+    // #endregion
     throw new Error(error.detail || "Analysis failed");
   }
 
