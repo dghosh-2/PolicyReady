@@ -9,12 +9,12 @@ interface ProgressBarProps {
   filename?: string;
 }
 
-const phases: { key: AnalysisPhase; label: string }[] = [
-  { key: "uploading", label: "Upload" },
-  { key: "extracting", label: "Extract Questions" },
-  { key: "keywords", label: "Generate Keywords" },
-  { key: "searching", label: "Search Policies" },
-  { key: "analyzing", label: "Analyze Compliance" },
+const phases: { key: AnalysisPhase; label: string; progressStart: number }[] = [
+  { key: "uploading", label: "Upload", progressStart: 0 },
+  { key: "extracting", label: "Extract Questions", progressStart: 10 },
+  { key: "keywords", label: "Generate Keywords", progressStart: 25 },
+  { key: "searching", label: "Search Policies", progressStart: 40 },
+  { key: "analyzing", label: "Analyze Compliance", progressStart: 50 },
 ];
 
 function getPhaseIndex(phase: AnalysisPhase): number {
@@ -26,18 +26,17 @@ export default function ProgressBar({ progress, status, phase, filename }: Progr
   const currentPhaseIndex = getPhaseIndex(phase);
   const isComplete = phase === "complete";
 
-  // Calculate overall progress
+  // Calculate overall progress based on phase and question completion
   let overallProgress = 0;
   if (isComplete) {
     overallProgress = 100;
   } else if (progress && phase === "analyzing") {
-    // During analyzing phase, progress is based on answered questions
-    const phaseBaseProgress = (currentPhaseIndex / phases.length) * 100;
-    const analyzeProgress = (progress.answered / progress.total) * (100 / phases.length);
-    overallProgress = Math.min(95, phaseBaseProgress + analyzeProgress);
-  } else {
-    // Other phases - show progress based on phase
-    overallProgress = ((currentPhaseIndex + 0.5) / phases.length) * 100;
+    // During analyzing phase (50-100%), progress is based on answered questions
+    const analyzeProgress = (progress.answered / progress.total) * 50; // 50% of total bar
+    overallProgress = Math.min(99, 50 + analyzeProgress);
+  } else if (currentPhaseIndex >= 0 && currentPhaseIndex < phases.length) {
+    // For other phases, use the defined progress start + a small offset to show activity
+    overallProgress = phases[currentPhaseIndex].progressStart + 5;
   }
 
   return (
