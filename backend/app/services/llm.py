@@ -13,8 +13,12 @@ from ..models import (
 
 load_dotenv()
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    print("WARNING: OPENAI_API_KEY not set!")
+
 client = AsyncOpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=OPENAI_API_KEY,
     timeout=30.0  # 30 second timeout
 )
 

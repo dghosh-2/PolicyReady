@@ -219,8 +219,12 @@ async def analyze_stream(file: UploadFile = File(...)):
             
         except Exception as e:
             import traceback
-            traceback.print_exc()
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            error_details = traceback.format_exc()
+            print(f"Analysis error: {error_details}")
+            error_msg = str(e)
+            if "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                error_msg = "OpenAI API key not configured. Please set OPENAI_API_KEY environment variable."
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
         finally:
             os.unlink(tmp_path)
     
