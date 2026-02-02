@@ -24,8 +24,9 @@ build/
 .DS_Store
 Thumbs.db
 
-# Index data (regeneratable)
-backend/app/index_data/
+# Index data (regeneratable) - keep gzipped version for deployment
+backend/app/index_data/index.json
+!backend/app/index_data/index.json.gz
 
 # Logs
 *.log

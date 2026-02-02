@@ -1,3 +1,5 @@
+import gzip
+import json
 from pathlib import Path
 from collections import defaultdict
 
@@ -158,11 +160,22 @@ def get_search_engine() -> KeywordSearchEngine:
             else:
                 print("Failed to fetch index.json from Supabase")
         
-        # Fall back to local file (for local development)
-        index_path = Path(__file__).parent.parent / "index_data" / "index.json"
-        if not index_path.exists():
-            raise FileNotFoundError(f"Index not found at {index_path}")
-        print(f"Loading index from local file: {index_path}")
-        _search_engine = KeywordSearchEngine(index_path=index_path)
-        _search_engine.load()
+        # Fall back to local file (for local development or Render deployment)
+        index_dir = Path(__file__).parent.parent / "index_data"
+        index_path = index_dir / "index.json"
+        index_gz_path = index_dir / "index.json.gz"
+        
+        # Try gzipped file first (smaller, used in deployment)
+        if index_gz_path.exists():
+            print(f"Loading index from gzipped file: {index_gz_path}")
+            with gzip.open(index_gz_path, 'rt', encoding='utf-8') as f:
+                index_data = json.load(f)
+            _search_engine = KeywordSearchEngine(index_data=index_data)
+            _search_engine.load()
+        elif index_path.exists():
+            print(f"Loading index from local file: {index_path}")
+            _search_engine = KeywordSearchEngine(index_path=index_path)
+            _search_engine.load()
+        else:
+            raise FileNotFoundError(f"Index not found at {index_path} or {index_gz_path}")
     return _search_engine
