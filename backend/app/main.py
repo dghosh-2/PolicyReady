@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -16,7 +17,7 @@ from .models import (
     ComplianceStatus
 )
 from .services.pdf_parser import extract_questions_from_pdf, extract_text_from_pdf
-from .services.search import get_search_engine
+from .services.search import get_search_engine, preload_index, is_index_loaded, get_index_status
 from .services.llm import extract_all_keywords_parallel, answer_all_questions_streaming
 from .services.supabase_storage import (
     is_supabase_configured,
@@ -27,7 +28,44 @@ from .services.supabase_storage import (
 
 load_dotenv()
 
-app = FastAPI(title="PolicyReady API", version="1.0.0")
+POLICIES_DIR = Path(__file__).parent.parent.parent / "Public Policies"
+
+
+def is_local_mode() -> bool:
+    """Check if we should use local filesystem (local dev) or Supabase (Vercel)."""
+    return POLICIES_DIR.exists() and not is_supabase_configured()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Startup/shutdown lifecycle handler.
+    Preloads the index at startup so users don't wait on first request.
+    """
+    print("=" * 50)
+    print("PolicyReady API starting up...")
+    print("=" * 50)
+    
+    # Preload the search index at startup (fail fast)
+    success = preload_index()
+    if success:
+        print("Index preloaded successfully - ready to serve requests!")
+    else:
+        print("WARNING: Index failed to preload - will retry on first search request")
+    
+    print("=" * 50)
+    
+    yield  # App runs here
+    
+    # Shutdown
+    print("PolicyReady API shutting down...")
+
+
+app = FastAPI(
+    title="PolicyReady API", 
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # Allow all origins for Vercel deployment
 app.add_middleware(
@@ -38,46 +76,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-POLICIES_DIR = Path(__file__).parent.parent.parent / "Public Policies"
-
-
-def is_local_mode() -> bool:
-    """Check if we should use local filesystem (local dev) or Supabase (Vercel)."""
-    return POLICIES_DIR.exists() and not is_supabase_configured()
-
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "mode": "local" if is_local_mode() else "supabase"}
+    """Root endpoint - basic status check."""
+    index_status = get_index_status()
+    return {
+        "status": "ok", 
+        "mode": "local" if is_local_mode() else "supabase",
+        "index_ready": index_status["loaded"]
+    }
 
 
 @app.get("/health")
 async def health_check():
     """
     Health check endpoint for keeping the server warm.
-    Verifies the index is loaded and ready.
+    Does NOT trigger index loading - just reports status.
     """
-    try:
-        engine = get_search_engine()
-        stats = engine.get_stats()
+    index_status = get_index_status()
+    
+    if index_status["loaded"]:
+        try:
+            engine = get_search_engine()
+            stats = engine.get_stats()
+            return {
+                "status": "healthy",
+                "index_loaded": True,
+                "chunks": stats.get("total_chunks", 0),
+                "keywords": stats.get("total_keywords", 0),
+                "load_time": stats.get("load_time_seconds", 0)
+            }
+        except Exception as e:
+            return {
+                "status": "degraded",
+                "index_loaded": False,
+                "error": str(e)
+            }
+    elif index_status["loading"]:
         return {
-            "status": "healthy",
-            "index_loaded": True,
-            "chunks": stats.get("total_chunks", 0),
-            "keywords": stats.get("total_keywords", 0)
+            "status": "starting",
+            "index_loaded": False,
+            "message": "Index is loading..."
         }
-    except Exception as e:
+    else:
         return {
             "status": "degraded",
             "index_loaded": False,
-            "error": str(e)
+            "error": index_status.get("error", "Index not loaded")
         }
 
 
 @app.get("/policies", response_model=PoliciesResponse)
 async def list_policies():
     if is_local_mode():
-        # Local filesystem mode
         if not POLICIES_DIR.exists():
             raise HTTPException(status_code=404, detail="Policies directory not found")
         
@@ -92,7 +144,6 @@ async def list_policies():
         
         return PoliciesResponse(folders=folders, total_files=total_files)
     else:
-        # Supabase mode
         folders_data = list_policy_folders()
         if not folders_data:
             raise HTTPException(status_code=404, detail="No policies found in storage")
@@ -106,7 +157,6 @@ async def list_policies():
 @app.get("/policies/{folder_name}", response_model=FolderContentsResponse)
 async def get_folder_contents(folder_name: str):
     if is_local_mode():
-        # Local filesystem mode
         folder_path = POLICIES_DIR / folder_name
         
         if not folder_path.exists():
@@ -119,7 +169,6 @@ async def get_folder_contents(folder_name: str):
         
         return FolderContentsResponse(folder=folder_name, files=files)
     else:
-        # Supabase mode
         files_data = list_folder_files(folder_name)
         if not files_data:
             raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found or empty")
@@ -136,7 +185,6 @@ async def get_pdf_text(folder_name: str, file_name: str):
         raise HTTPException(status_code=400, detail="Only PDF files supported")
     
     if is_local_mode():
-        # Local filesystem mode
         file_path = POLICIES_DIR / folder_name / file_name
         
         if not file_path.exists():
@@ -148,7 +196,6 @@ async def get_pdf_text(folder_name: str, file_name: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to extract text: {str(e)}")
     else:
-        # Supabase mode - download to temp file first
         tmp_path = download_pdf_to_temp(folder_name, file_name)
         if not tmp_path:
             raise HTTPException(status_code=404, detail=f"File not found: {file_name}")
@@ -165,11 +212,12 @@ async def get_pdf_text(folder_name: str, file_name: str):
 
 @app.get("/index/stats")
 async def get_index_stats():
+    """Get index statistics. This WILL trigger index loading if not loaded."""
     try:
         engine = get_search_engine()
         return engine.get_stats()
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Index not found. Run 'npm run index' first.")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.post("/analyze/stream")
@@ -177,9 +225,9 @@ async def analyze_stream(file: UploadFile = File(...)):
     """
     Stream analysis results with optimized flow:
     1. Extract questions from PDF
-    2. Extract keywords for ALL questions in parallel (async)
+    2. Extract keywords for ALL questions (local, instant)
     3. Search ALL keywords at once (batch, instant)
-    4. Answer ALL questions in parallel (async), streaming results
+    4. Answer ALL questions in batches, streaming results
     """
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files supported")
@@ -203,25 +251,24 @@ async def analyze_stream(file: UploadFile = File(...)):
             # Send all questions to frontend immediately
             yield f"data: {json.dumps({'type': 'questions', 'questions': questions, 'total': len(questions)})}\n\n"
             
-            # Step 2: Extract keywords for ALL questions in parallel
+            # Step 2: Extract keywords (local, instant)
             yield f"data: {json.dumps({'type': 'phase', 'phase': 'keywords', 'message': f'Generating keywords for {len(questions)} questions...'})}\n\n"
             
             all_keywords = await extract_all_keywords_parallel(questions)
             
-            # Step 3: Search ALL at once (batch search - instant)
+            # Step 3: Search (index should already be loaded from startup)
             yield f"data: {json.dumps({'type': 'phase', 'phase': 'searching', 'message': 'Searching policy database...'})}\n\n"
             
             engine = get_search_engine()
             all_evidence = engine.search_batch(all_keywords, top_k_per_query=6)
             
-            # Log search results for debugging
+            # Log search results
             for i, (kw, ev) in enumerate(zip(all_keywords, all_evidence)):
                 print(f"Q{i+1} keywords: {kw[:5]}... -> {len(ev)} chunks found")
             
             # Step 4: Analyze compliance
             yield f"data: {json.dumps({'type': 'phase', 'phase': 'analyzing', 'message': 'Analyzing compliance for each question...'})}\n\n"
             
-            # Step 4: Answer ALL questions in parallel, streaming results
             answered = 0
             met = 0
             not_met = 0
@@ -238,7 +285,6 @@ async def analyze_stream(file: UploadFile = File(...)):
                 
                 yield f"data: {json.dumps({'type': 'answer', 'index': idx, 'answer': answer.model_dump(), 'progress': {'answered': answered, 'total': len(questions), 'met': met, 'not_met': not_met, 'partial': partial}})}\n\n"
             
-            # Complete
             yield f"data: {json.dumps({'type': 'complete', 'total': len(questions), 'met': met, 'not_met': not_met, 'partial': partial})}\n\n"
             
         except Exception as e:
@@ -258,8 +304,8 @@ async def analyze_stream(file: UploadFile = File(...)):
         headers={
             "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-            "Content-Encoding": "none",  # Prevent compression buffering
+            "X-Accel-Buffering": "no",
+            "Content-Encoding": "none",
         }
     )
 
@@ -281,14 +327,11 @@ async def analyze(file: UploadFile = File(...)):
         if not questions:
             raise HTTPException(status_code=400, detail="No questions found")
         
-        # Parallel keyword extraction
         all_keywords = await extract_all_keywords_parallel(questions)
         
-        # Batch search
         engine = get_search_engine()
         all_evidence = engine.search_batch(all_keywords, top_k_per_query=6)
         
-        # Parallel answering
         answers = []
         async for idx, answer in answer_all_questions_streaming(questions, all_evidence):
             answers.append((idx, answer))
