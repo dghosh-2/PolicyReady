@@ -5,7 +5,7 @@ import PolicyBrowser from "@/components/PolicyBrowser";
 import FileUpload from "@/components/FileUpload";
 import QuestionCard from "@/components/QuestionCard";
 import HistoryPanel from "@/components/HistoryPanel";
-import { analyzeStream } from "@/lib/api";
+import { analyzeStream, pingHealth } from "@/lib/api";
 import { saveToHistory, getHistory } from "@/lib/history";
 import type { ComplianceAnswer, AnalysisProgress, IndexStats, AnalysisHistoryItem } from "@/types";
 
@@ -23,9 +23,19 @@ export default function Home() {
   const [currentFilename, setCurrentFilename] = useState<string>("");
   const [historyCount, setHistoryCount] = useState(0);
 
-  // Load history count on mount
+  // Load history count on mount and ping backend to keep it warm
   useEffect(() => {
     setHistoryCount(getHistory().length);
+    
+    // Ping backend immediately to wake it up
+    pingHealth();
+    
+    // Keep backend warm by pinging every 4 minutes
+    const interval = setInterval(() => {
+      pingHealth();
+    }, 4 * 60 * 1000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   const handleFileSelect = useCallback(async (file: File) => {

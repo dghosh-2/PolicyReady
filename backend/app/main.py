@@ -51,6 +51,29 @@ async def root():
     return {"status": "ok", "mode": "local" if is_local_mode() else "supabase"}
 
 
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for keeping the server warm.
+    Verifies the index is loaded and ready.
+    """
+    try:
+        engine = get_search_engine()
+        stats = engine.get_stats()
+        return {
+            "status": "healthy",
+            "index_loaded": True,
+            "chunks": stats.get("total_chunks", 0),
+            "keywords": stats.get("total_keywords", 0)
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "index_loaded": False,
+            "error": str(e)
+        }
+
+
 @app.get("/policies", response_model=PoliciesResponse)
 async def list_policies():
     if is_local_mode():

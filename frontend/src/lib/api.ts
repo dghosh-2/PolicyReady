@@ -42,6 +42,18 @@ export async function fetchIndexStats(): Promise<IndexStats> {
   return res.json();
 }
 
+/**
+ * Ping the health endpoint to keep the backend warm.
+ * Called on page load and every 4 minutes to prevent Render cold starts.
+ */
+export async function pingHealth(): Promise<void> {
+  try {
+    await fetch(`${getApiUrl()}/health`, { method: "GET" });
+  } catch {
+    // Silently ignore errors - this is just a keep-alive ping
+  }
+}
+
 export async function fetchPDFText(
   folderName: string,
   fileName: string
