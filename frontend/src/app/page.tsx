@@ -56,12 +56,13 @@ export default function Home() {
         switch (event.type) {
           case "status":
           case "phase":
-            // Status updates - we don't show these since Vercel buffers the stream
+            // Status updates
             break;
 
           case "questions":
             finalQuestions = event.questions;
             setQuestions(event.questions);
+            // Initialize progress with all zeros - stats bar shows immediately
             setProgress({
               answered: 0,
               total: event.total,
@@ -77,6 +78,7 @@ export default function Home() {
               ...prev,
               [event.index]: event.answer,
             }));
+            // Update progress in real-time
             setProgress(event.progress);
             finalProgress = event.progress;
             break;
@@ -140,6 +142,9 @@ export default function Home() {
     setAnalysisState("complete");
     setActiveTab("analyze");
   };
+
+  // Calculate pending count
+  const pendingCount = progress ? progress.total - progress.answered : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-sky-50">
@@ -278,33 +283,65 @@ export default function Home() {
               </div>
             )}
 
-            {/* Summary header when complete */}
-            {analysisState === "complete" && progress && (
+            {/* Live Stats Bar - shows immediately when questions are extracted */}
+            {progress && questions.length > 0 && (
               <div className="bg-white rounded-2xl border border-sky-100 p-5 shadow-sm">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-semibold text-sky-900">Analysis Complete</h3>
+                    <h3 className="font-semibold text-sky-900">
+                      {analysisState === "complete" ? "Analysis Complete" : "Analyzing..."}
+                    </h3>
                     <p className="text-sm text-sky-600 mt-0.5">{currentFilename}</p>
                   </div>
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                      <span className="font-medium text-emerald-700">{progress.met} Met</span>
+                  {analysisState === "analyzing" && (
+                    <div className="flex items-center gap-2 text-sm text-sky-500">
+                      <div className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+                      <span>{progress.answered} / {progress.total}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                      <span className="font-medium text-amber-700">{progress.partial} Partial</span>
+                  )}
+                </div>
+                
+                {/* Color-coded stats */}
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                    <span className="font-semibold text-emerald-700">{progress.met}</span>
+                    <span className="text-emerald-600">Met</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                    <span className="font-semibold text-amber-700">{progress.partial}</span>
+                    <span className="text-amber-600">Partial</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                    <span className="font-semibold text-red-700">{progress.not_met}</span>
+                    <span className="text-red-600">Not Met</span>
+                  </div>
+                  {pendingCount > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-gray-300 animate-pulse"></div>
+                      <span className="font-semibold text-gray-500">{pendingCount}</span>
+                      <span className="text-gray-500">Pending</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                      <span className="font-medium text-red-700">{progress.not_met} Not Met</span>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                {analysisState === "analyzing" && (
+                  <div className="mt-4">
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-sky-500 to-sky-400 transition-all duration-300 ease-out"
+                        style={{ width: `${progress.total > 0 ? (progress.answered / progress.total) * 100 : 0}%` }}
+                      />
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
-            {/* Questions list - show results */}
+            {/* Questions list - show immediately when extracted */}
             {questions.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -326,7 +363,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Loading state while processing */}
+            {/* Loading state while extracting questions */}
             {analysisState === "analyzing" && questions.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20">
                 <div className="relative">
@@ -335,15 +372,8 @@ export default function Home() {
                 </div>
                 <h3 className="mt-6 text-lg font-semibold text-sky-900">Analyzing {currentFilename}</h3>
                 <p className="mt-2 text-sky-600 text-center max-w-md">
-                  Extracting questions, searching policies, and evaluating compliance. 
-                  This typically takes 30-60 seconds.
+                  Extracting questions from PDF...
                 </p>
-                <div className="mt-6 flex items-center gap-2 text-sm text-sky-500">
-                  <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                  </svg>
-                  <span>Processing...</span>
-                </div>
               </div>
             )}
           </div>

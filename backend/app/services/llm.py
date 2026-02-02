@@ -1,7 +1,7 @@
 import os
 import asyncio
+import json
 from typing import Optional, AsyncGenerator
-from pydantic import BaseModel, Field
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError
 from dotenv import load_dotenv
 
@@ -26,11 +26,6 @@ client = AsyncOpenAI(
 # Higher concurrency for batched requests
 MAX_CONCURRENT = 5
 BATCH_SIZE = 5  # Process 5 questions per API call
-
-
-class BatchAnswerResult(BaseModel):
-    """Result for a batch of questions."""
-    answers: list[dict] = Field(description="List of {index, status, quote, doc, page}")
 
 
 def extract_keywords_local(question: str) -> list[str]:
@@ -81,7 +76,7 @@ async def _answer_batch(
     batch: list[tuple[int, str, list[ChunkMatch]]],
     semaphore: asyncio.Semaphore
 ) -> list[tuple[int, ComplianceAnswer]]:
-    """Answer a batch of questions in a single API call."""
+    """Answer a batch of questions in a single API call using JSON mode."""
     
     # Separate questions with and without evidence
     questions_with_evidence = []
@@ -111,88 +106,101 @@ async def _answer_batch(
     if not questions_with_evidence:
         return no_evidence_results
     
-    # Build batch prompt
-    system_prompt = """Analyze each compliance question against its evidence.
+    # Build batch prompt with explicit JSON format instructions
+    system_prompt = """You are a compliance analyst. Analyze each question against its evidence.
+
 For each question, determine:
 - MET: Evidence clearly proves the requirement is met
-- NOT_MET: No evidence proves the requirement
+- NOT_MET: No evidence proves the requirement  
 - PARTIAL: Evidence is incomplete or unclear
 
-Return JSON with format:
+You MUST respond with valid JSON in this exact format:
 {
   "answers": [
     {"index": 0, "status": "MET", "quote": "exact quote from doc", "doc": "filename", "page": 1},
-    {"index": 1, "status": "NOT_MET", "quote": null, "doc": null, "page": null},
-    ...
+    {"index": 1, "status": "NOT_MET", "quote": null, "doc": null, "page": null}
   ]
 }
 
-Include exact quotes only for MET or PARTIAL status."""
+Rules:
+- Include exact quotes only for MET or PARTIAL status
+- Use the question index (Q0, Q1, etc.) for the "index" field
+- status must be exactly "MET", "NOT_MET", or "PARTIAL"
+- Return one answer object per question"""
 
     user_prompt = _build_batch_prompt(questions_with_evidence)
     
+    # Use JSON mode instead of structured outputs to avoid schema issues
     response = await _call_with_retry(
-        client.beta.chat.completions.parse(
+        client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            response_format=BatchAnswerResult,
+            response_format={"type": "json_object"},
             temperature=0,
-            max_tokens=1500  # More tokens for batch response
+            max_tokens=1500
         ),
         semaphore
     )
     
     results = list(no_evidence_results)
     
-    if response and response.choices[0].message.parsed:
-        parsed = response.choices[0].message.parsed
-        
-        # Map results back to original indices
-        idx_to_question = {idx: q for idx, q, _ in questions_with_evidence}
-        
-        for answer in parsed.answers:
-            orig_idx = answer.get("index")
-            if orig_idx is None:
-                continue
-                
-            # Find the actual question index from our batch
-            actual_idx = None
-            for batch_idx, question, _ in questions_with_evidence:
-                if batch_idx == orig_idx or questions_with_evidence.index((batch_idx, question, _)) == orig_idx:
-                    actual_idx = batch_idx
-                    break
+    if response and response.choices[0].message.content:
+        try:
+            parsed = json.loads(response.choices[0].message.content)
+            answers_list = parsed.get("answers", [])
             
-            if actual_idx is None:
-                # Try direct index mapping
-                if orig_idx < len(questions_with_evidence):
-                    actual_idx = questions_with_evidence[orig_idx][0]
-                else:
+            # Map results back to original indices
+            idx_to_question = {idx: q for idx, q, _ in questions_with_evidence}
+            
+            for answer in answers_list:
+                orig_idx = answer.get("index")
+                if orig_idx is None:
                     continue
-            
-            question = idx_to_question.get(actual_idx, "")
-            
-            status_str = answer.get("status", "NOT_MET").upper()
-            status = ComplianceStatus.NOT_MET
-            if status_str == "MET":
-                status = ComplianceStatus.MET
-            elif status_str == "PARTIAL":
-                status = ComplianceStatus.PARTIAL
-            
-            results.append((actual_idx, ComplianceAnswer(
-                question=question,
-                status=status,
-                evidence=answer.get("quote"),
-                source=answer.get("doc"),
-                page=answer.get("page"),
-                confidence=0.8 if status == ComplianceStatus.MET else 0.5,
-                reasoning=""
-            )))
-    else:
-        # API failed - return NOT_MET for all questions in batch
-        for idx, question, _ in questions_with_evidence:
+                
+                # Find the actual question index from our batch
+                actual_idx = None
+                for batch_idx, question, _ in questions_with_evidence:
+                    if batch_idx == orig_idx:
+                        actual_idx = batch_idx
+                        break
+                
+                if actual_idx is None:
+                    # Try direct index mapping (in case model returned 0, 1, 2 instead of actual indices)
+                    if isinstance(orig_idx, int) and orig_idx < len(questions_with_evidence):
+                        actual_idx = questions_with_evidence[orig_idx][0]
+                    else:
+                        continue
+                
+                question = idx_to_question.get(actual_idx, "")
+                
+                status_str = str(answer.get("status", "NOT_MET")).upper()
+                status = ComplianceStatus.NOT_MET
+                if status_str == "MET":
+                    status = ComplianceStatus.MET
+                elif status_str == "PARTIAL":
+                    status = ComplianceStatus.PARTIAL
+                
+                results.append((actual_idx, ComplianceAnswer(
+                    question=question,
+                    status=status,
+                    evidence=answer.get("quote"),
+                    source=answer.get("doc"),
+                    page=answer.get("page"),
+                    confidence=0.8 if status == ComplianceStatus.MET else 0.5,
+                    reasoning=""
+                )))
+        except json.JSONDecodeError as e:
+            print(f"JSON parse error: {e}")
+            # Fall through to error handling below
+    
+    # Check if we got results for all questions with evidence
+    result_indices = {idx for idx, _ in results}
+    for idx, question, _ in questions_with_evidence:
+        if idx not in result_indices:
+            # API failed for this question - return NOT_MET
             results.append((idx, ComplianceAnswer(
                 question=question,
                 status=ComplianceStatus.NOT_MET,
