@@ -23,30 +23,141 @@ client = AsyncOpenAI(
     timeout=30.0
 )
 
-# Higher concurrency for batched requests
+# Reduced batch size for better accuracy (was 5)
 MAX_CONCURRENT = 5
-BATCH_SIZE = 5  # Process 5 questions per API call
+BATCH_SIZE = 3  # Process 3 questions per API call for better focus
+
+# Healthcare domain synonyms for better search coverage
+HEALTHCARE_SYNONYMS = {
+    # Member/Patient terms
+    "member": ["patient", "enrollee", "beneficiary", "subscriber", "participant", "individual"],
+    "patient": ["member", "enrollee", "beneficiary", "individual"],
+    "enrollee": ["member", "patient", "beneficiary", "subscriber"],
+    
+    # Provider terms
+    "provider": ["physician", "doctor", "practitioner", "clinician", "specialist", "healthcare provider"],
+    "physician": ["provider", "doctor", "practitioner", "clinician"],
+    "doctor": ["provider", "physician", "practitioner", "clinician"],
+    
+    # Grievance/Complaint terms
+    "grievance": ["complaint", "appeal", "dispute", "concern", "issue", "problem", "grievances"],
+    "complaint": ["grievance", "appeal", "dispute", "concern", "issue", "complaints"],
+    "appeal": ["grievance", "complaint", "dispute", "review", "reconsideration", "appeals"],
+    "appeals": ["appeal", "grievance", "complaint", "dispute", "review", "reconsideration"],
+    
+    # Credentialing terms
+    "credentialing": ["credentialed", "credentials", "privileging", "verification", "qualification"],
+    "credentials": ["credentialing", "privileging", "qualifications", "certification"],
+    
+    # Authorization terms
+    "authorization": ["approval", "preauthorization", "prior authorization", "pre-approval", "certified"],
+    "preauthorization": ["authorization", "prior authorization", "pre-approval", "precertification"],
+    "approval": ["authorization", "approved", "certified", "granted"],
+    
+    # Coverage terms
+    "coverage": ["benefit", "covered", "benefits", "plan", "insurance"],
+    "benefit": ["coverage", "covered", "benefits", "entitlement"],
+    "benefits": ["coverage", "benefit", "covered services", "entitlements"],
+    
+    # Care management terms
+    "care": ["treatment", "service", "services", "healthcare", "medical care"],
+    "treatment": ["care", "therapy", "service", "intervention", "procedure"],
+    "service": ["care", "treatment", "services", "procedure"],
+    
+    # Quality terms
+    "quality": ["performance", "standards", "metrics", "outcomes", "measures"],
+    "compliance": ["adherence", "conformance", "regulatory", "requirements"],
+    
+    # Network terms
+    "network": ["contracted", "participating", "in-network", "panel"],
+    "contracted": ["network", "participating", "agreement"],
+    
+    # Utilization terms
+    "utilization": ["use", "usage", "review", "management", "um"],
+    "review": ["evaluation", "assessment", "analysis", "audit"],
+    
+    # Access terms
+    "access": ["availability", "accessible", "timely", "appointment"],
+    "timely": ["prompt", "within", "timeframe", "deadline", "days"],
+    
+    # Documentation terms
+    "documentation": ["records", "documents", "documented", "paperwork", "files"],
+    "policy": ["policies", "procedure", "guideline", "protocol", "rule"],
+    "procedure": ["process", "policy", "protocol", "guideline", "method"],
+    
+    # Notification terms
+    "notification": ["notice", "notify", "inform", "communication", "letter"],
+    "notice": ["notification", "notify", "inform", "communication"],
+    
+    # Rights terms
+    "rights": ["right", "entitlement", "entitled", "protection"],
+    
+    # Denial terms
+    "denial": ["denied", "deny", "rejection", "adverse", "unfavorable"],
+    "denied": ["denial", "deny", "rejected", "adverse"],
+    
+    # Emergency terms
+    "emergency": ["urgent", "emergent", "crisis", "immediate"],
+    "urgent": ["emergency", "emergent", "immediate", "priority"],
+    
+    # Behavioral health terms
+    "behavioral": ["mental", "psychiatric", "psychological", "behavioral health"],
+    "mental": ["behavioral", "psychiatric", "psychological", "mental health"],
+    
+    # Pharmacy terms
+    "pharmacy": ["prescription", "drug", "medication", "formulary", "pharmaceutical"],
+    "prescription": ["pharmacy", "drug", "medication", "rx"],
+    "medication": ["drug", "prescription", "medicine", "pharmaceutical"],
+    
+    # HIPAA/Privacy terms
+    "hipaa": ["privacy", "confidentiality", "protected health information", "phi"],
+    "privacy": ["hipaa", "confidentiality", "confidential", "protected"],
+    "confidentiality": ["privacy", "confidential", "hipaa", "protected"],
+}
+
+
+def expand_keywords_with_synonyms(keywords: list[str]) -> list[str]:
+    """Expand keywords with healthcare domain synonyms."""
+    expanded = set(keywords)
+    
+    for keyword in keywords:
+        kw_lower = keyword.lower()
+        # Check if this keyword has synonyms
+        if kw_lower in HEALTHCARE_SYNONYMS:
+            for synonym in HEALTHCARE_SYNONYMS[kw_lower]:
+                expanded.add(synonym.lower())
+        
+        # Also check if any synonym maps back to this keyword
+        for base_term, synonyms in HEALTHCARE_SYNONYMS.items():
+            if kw_lower in [s.lower() for s in synonyms]:
+                expanded.add(base_term)
+                for syn in synonyms:
+                    expanded.add(syn.lower())
+    
+    return list(expanded)
 
 
 def extract_keywords_local(question: str) -> list[str]:
     """
-    Extract keywords from a question using local NLP (no API call).
-    Uses the existing extract_keywords_from_text function.
+    Extract keywords from a question using local NLP with synonym expansion.
     """
+    # Get base keywords
     keywords = extract_keywords_from_text(question)
-    # Return top 8 keywords (most relevant for search)
-    return keywords[:8]
+    
+    # Expand with healthcare synonyms
+    expanded = expand_keywords_with_synonyms(keywords)
+    
+    # Return expanded keywords (more terms = better search coverage)
+    return expanded[:15]  # Increased from 8 to 15 for better coverage
 
 
 def extract_all_keywords_local(questions: list[str]) -> list[list[str]]:
-    """Extract keywords for all questions locally (instant, no API calls)."""
+    """Extract keywords for all questions locally with synonym expansion."""
     return [extract_keywords_local(q) for q in questions]
 
 
-# Keep the async version for API compatibility but use local extraction
 async def extract_all_keywords_parallel(questions: list[str]) -> list[list[str]]:
-    """Extract keywords for all questions - now uses local NLP instead of LLM."""
-    # This is now instant - no API calls needed!
+    """Extract keywords for all questions - uses local NLP with synonym expansion."""
     return extract_all_keywords_local(questions)
 
 
@@ -95,10 +206,10 @@ async def _answer_batch(
                 reasoning="No relevant policy documents found"
             )))
         else:
-            # Build evidence string (top 2 chunks, truncated)
+            # Build evidence string - use top 3 chunks for better coverage (was 2)
             evidence_str = ""
-            for c in evidence_chunks[:2]:
-                text = c.text[:500]
+            for c in evidence_chunks[:3]:
+                text = c.text[:600]  # Slightly more text per chunk
                 evidence_str += f"[{c.source} p{c.page}] {text}\n"
             questions_with_evidence.append((idx, question, evidence_str))
     
@@ -106,31 +217,36 @@ async def _answer_batch(
     if not questions_with_evidence:
         return no_evidence_results
     
-    # Build batch prompt with explicit JSON format instructions
-    system_prompt = """You are a compliance analyst. Analyze each question against its evidence.
+    # Improved system prompt for better accuracy
+    system_prompt = """You are an expert healthcare compliance analyst reviewing policy documents.
 
-For each question, determine:
-- MET: Evidence clearly proves the requirement is met
-- NOT_MET: No evidence proves the requirement  
-- PARTIAL: Evidence is incomplete or unclear
+For each question, carefully analyze the provided evidence and determine:
+- MET: The evidence CLEARLY and DIRECTLY addresses the requirement. There is explicit policy language that satisfies the question.
+- PARTIAL: The evidence partially addresses the requirement but is incomplete, vague, or only indirectly related.
+- NOT_MET: The evidence does not address the requirement, or no relevant evidence was found.
 
-You MUST respond with valid JSON in this exact format:
+IMPORTANT: Be thorough in your analysis. If the evidence contains relevant policy language that addresses the question's requirement, mark it as MET. Look for:
+- Direct statements of policy or procedure
+- Requirements, standards, or guidelines that address the question
+- Processes or protocols that fulfill the requirement
+
+Respond with valid JSON:
 {
   "answers": [
-    {"index": 0, "status": "MET", "quote": "exact quote from doc", "doc": "filename", "page": 1},
+    {"index": 0, "status": "MET", "quote": "exact quote proving compliance", "doc": "filename", "page": 1},
     {"index": 1, "status": "NOT_MET", "quote": null, "doc": null, "page": null}
   ]
 }
 
 Rules:
-- Include exact quotes only for MET or PARTIAL status
-- Use the question index (Q0, Q1, etc.) for the "index" field
-- status must be exactly "MET", "NOT_MET", or "PARTIAL"
-- Return one answer object per question"""
+- Analyze each question INDEPENDENTLY and thoroughly
+- Include the exact quote from the evidence for MET or PARTIAL
+- Use the question index number (from Q0, Q1, etc.) for the "index" field
+- Be generous in marking MET if evidence clearly supports the requirement"""
 
     user_prompt = _build_batch_prompt(questions_with_evidence)
     
-    # Use JSON mode instead of structured outputs to avoid schema issues
+    # Use JSON mode
     response = await _call_with_retry(
         client.chat.completions.create(
             model="gpt-4o-mini",
@@ -140,7 +256,7 @@ Rules:
             ],
             response_format={"type": "json_object"},
             temperature=0,
-            max_tokens=1500
+            max_tokens=2000  # Increased for more detailed responses
         ),
         semaphore
     )
@@ -168,7 +284,7 @@ Rules:
                         break
                 
                 if actual_idx is None:
-                    # Try direct index mapping (in case model returned 0, 1, 2 instead of actual indices)
+                    # Try direct index mapping
                     if isinstance(orig_idx, int) and orig_idx < len(questions_with_evidence):
                         actual_idx = questions_with_evidence[orig_idx][0]
                     else:
@@ -189,18 +305,16 @@ Rules:
                     evidence=answer.get("quote"),
                     source=answer.get("doc"),
                     page=answer.get("page"),
-                    confidence=0.8 if status == ComplianceStatus.MET else 0.5,
+                    confidence=0.85 if status == ComplianceStatus.MET else 0.6,
                     reasoning=""
                 )))
         except json.JSONDecodeError as e:
             print(f"JSON parse error: {e}")
-            # Fall through to error handling below
     
     # Check if we got results for all questions with evidence
     result_indices = {idx for idx, _ in results}
     for idx, question, _ in questions_with_evidence:
         if idx not in result_indices:
-            # API failed for this question - return NOT_MET
             results.append((idx, ComplianceAnswer(
                 question=question,
                 status=ComplianceStatus.NOT_MET,
